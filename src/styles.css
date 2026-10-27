@@ -691,3 +691,540 @@ input[type="range"]::-webkit-slider-thumb {
   content: '⚠ ';
   color: var(--crimson);
 }
+
+/* ============================================================
+   MODO JUEGO — HUD simplificado (solo datos importantes)
+   ============================================================ */
+#game-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 24;
+}
+
+#game-hud .hud-card,
+#game-hud .vital-card,
+#game-hud .presence-banner,
+#game-hud #walk-controls {
+  pointer-events: auto;
+}
+
+/* --- Banner de presencia humana --- */
+.presence-banner {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 380px;
+  max-width: 90vw;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(9, 16, 30, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+}
+
+.pb-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #64748b;
+  box-shadow: 0 0 0 4px rgba(100, 116, 139, 0.18);
+  flex: 0 0 auto;
+}
+
+.pb-text { flex: 1 1 auto; min-width: 0; }
+
+#presence-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+  color: #cbd5e1;
+}
+
+#presence-sub {
+  font-size: 10.5px;
+  color: #94a3b8;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pb-dist {
+  font-family: ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: #94a3b8;
+  flex: 0 0 auto;
+}
+
+.presence-banner.detected {
+  border-color: rgba(56, 189, 248, 0.7);
+  background: rgba(8, 30, 48, 0.9);
+  box-shadow: 0 0 28px rgba(56, 189, 248, 0.32);
+}
+.presence-banner.detected .pb-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.22), 0 0 14px #38bdf8;
+  animation: pb-pulse 1.4s ease-in-out infinite;
+}
+.presence-banner.detected #presence-title { color: #bae6fd; }
+.presence-banner.detected .pb-dist { color: #7dd3fc; }
+
+.presence-banner.locked {
+  border-color: rgba(52, 211, 153, 0.8);
+  background: rgba(5, 38, 30, 0.92);
+  box-shadow: 0 0 34px rgba(16, 185, 129, 0.38);
+}
+.presence-banner.locked .pb-dot {
+  background: #34d399;
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.24), 0 0 16px #34d399;
+  animation: pb-pulse 0.85s ease-in-out infinite;
+}
+.presence-banner.locked #presence-title { color: #a7f3d0; }
+.presence-banner.locked .pb-dist { color: #6ee7b7; }
+
+@keyframes pb-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.72; }
+}
+
+/* --- Tarjetas HUD --- */
+.hud-card {
+  position: absolute;
+  width: 300px;
+  padding: 12px 13px;
+  border-radius: var(--radius-lg);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+
+.hud-card .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  color: #7dd3fc;
+  margin-bottom: 9px;
+}
+
+.mini-badge {
+  font-family: ui-monospace, monospace;
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(56, 189, 248, 0.14);
+  color: #7dd3fc;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.hud-card.pressure {
+  left: 18px;
+  top: 96px;
+}
+
+.big-force {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.big-num {
+  font-family: ui-monospace, monospace;
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
+  color: #fbbf24;
+  text-shadow: 0 0 22px rgba(251, 191, 36, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+
+.big-unit {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fcd34d;
+}
+
+.kg-chip {
+  margin-left: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  color: #fde68a;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.force-bar {
+  margin: 9px 0 10px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.force-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22d3ee 0%, #34d399 34%, #fbbf24 68%, #ff2e4c 100%);
+  transition: width 0.12s linear;
+}
+
+.force-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.force-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.force-row strong {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pressure-hint {
+  margin-top: 8px;
+  font-size: 9.5px;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+/* --- Mapa --- */
+.hud-card.map {
+  right: 18px;
+  top: 96px;
+  width: 330px;
+}
+
+#room-map {
+  width: 100%;
+  height: 236px;
+  display: block;
+  border-radius: 10px;
+  background: #050c18;
+}
+
+.map-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 9.5px;
+  color: #94a3b8;
+}
+
+.map-legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.map-legend .dot.you { background: #22d3ee; }
+.map-legend .dot.cane { background: #fbbf24; }
+.map-legend .dot.person { background: #f472b6; }
+
+.map-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.map-stats div {
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 8px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.map-stats span {
+  font-size: 8.5px;
+  letter-spacing: 0.4px;
+  color: #7c8ea8;
+}
+
+.map-stats strong {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.map-objective {
+  margin-top: 8px;
+  font-size: 9.5px;
+  color: #fcd34d;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  border-radius: 8px;
+  padding: 5px 8px;
+  text-align: center;
+}
+
+.map-objective.done {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+/* --- Signos vitales --- */
+#vitals-strip {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+}
+
+.vital-card {
+  width: 214px;
+  padding: 9px 12px 8px;
+  border-radius: 14px;
+  background: rgba(9, 16, 30, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, opacity 0.25s ease;
+  opacity: 0.72;
+}
+
+.vital-card.active { opacity: 1; }
+.vital-card.hr.active {
+  border-color: rgba(251, 113, 133, 0.6);
+  box-shadow: 0 0 26px rgba(251, 113, 133, 0.22);
+}
+.vital-card.rr.active {
+  border-color: rgba(45, 212, 191, 0.6);
+  box-shadow: 0 0 26px rgba(45, 212, 191, 0.22);
+}
+
+.vital-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: #94a3b8;
+}
+
+.vital-head .quality {
+  font-family: ui-monospace, monospace;
+  font-size: 9px;
+  color: #64748b;
+}
+
+.vital-body {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 2px 0 3px;
+}
+
+.vital-num {
+  font-family: ui-monospace, monospace;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.vital-card.hr.active .vital-num { color: #fb7185; }
+.vital-card.rr.active .vital-num { color: #2dd4bf; }
+
+.vital-unit {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.vital-card canvas {
+  width: 100%;
+  height: 30px;
+  display: block;
+}
+
+/* --- Controles de caminata --- */
+#walk-controls {
+  position: absolute;
+  left: 18px;
+  bottom: 22px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+#joystick {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 45%, rgba(14, 165, 233, 0.2), rgba(9, 16, 30, 0.86));
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  backdrop-filter: blur(10px);
+  touch-action: none;
+  cursor: grab;
+  flex: 0 0 auto;
+}
+
+#joystick:active { cursor: grabbing; }
+
+#joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #7dd3fc, #0284c7);
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.55);
+  transition: transform 0.05s linear;
+}
+
+.joy-label {
+  position: absolute;
+  bottom: 6px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 8px;
+  letter-spacing: 1.4px;
+  color: rgba(186, 230, 253, 0.7);
+  pointer-events: none;
+}
+
+.walk-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  max-width: 300px;
+}
+
+.walk-buttons .btn {
+  font-size: 10px;
+  padding: 7px 9px;
+  justify-content: center;
+  text-align: center;
+}
+
+.kbd-hint {
+  position: absolute;
+  left: 0;
+  bottom: -20px;
+  font-size: 9.5px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+/* --- Modo técnico: oculta el HUD de juego y muestra la telemetría --- */
+body.mode-game .side-dock { transform: translateX(-140%); opacity: 0; pointer-events: none; }
+body.mode-game .side-dock.right { transform: translateX(140%); }
+body.mode-game .bottom-hint { display: none; }
+body.mode-game #game-hud { display: block; }
+
+body:not(.mode-game) #game-hud { display: none; }
+
+.side-dock { transition: transform 0.35s ease, opacity 0.35s ease; }
+
+#btn-mode.active { border-color: var(--panel-border-strong); color: #7dd3fc; }
+
+@media (max-width: 1180px) {
+  .hud-card { width: 260px; }
+  .hud-card.map { width: 290px; }
+  #room-map { height: 200px; }
+}
+
+@media (max-width: 900px) {
+  .presence-banner { top: 88px; min-width: 0; width: calc(100vw - 24px); }
+  #presence-sub { font-size: 9.5px; }
+  .hud-card.pressure { top: 150px; left: 10px; width: calc(50vw - 16px); }
+  .hud-card.map { top: 150px; right: 10px; width: calc(50vw - 16px); }
+  #room-map { height: 150px; }
+  .big-num { font-size: 30px; }
+  .force-row { font-size: 9px; }
+  #vitals-strip { bottom: 10px; gap: 8px; }
+  .vital-card { width: 150px; padding: 7px 9px 6px; }
+  .vital-num { font-size: 25px; }
+  #walk-controls { bottom: 96px; left: 10px; }
+  #joystick { width: 78px; height: 78px; }
+  .walk-buttons { display: none; }
+}
+
+/* Toast del modo juego */
+#game-toast {
+  position: absolute;
+  left: 50%;
+  top: 152px;
+  transform: translate(-50%, -8px);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(8, 47, 73, 0.94);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  color: #bae6fd;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 40;
+  white-space: nowrap;
+}
+
+#game-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (max-width: 900px) {
+  #game-toast { top: 136px; font-size: 10px; max-width: 92vw; white-space: normal; text-align: center; }
+}
+
+/* En modo juego la barra superior queda minimalista */
+body.mode-game #btn-cam-overview,
+body.mode-game #btn-cam-handle,
+body.mode-game #btn-cam-base,
+body.mode-game #btn-cam-radar,
+body.mode-game #btn-toggle-panels {
+  display: none;
+}
+
+body.mode-game .hud-actions { gap: 6px; }
+body.mode-game .btn-mode { border-color: rgba(56, 189, 248, 0.4); }
+
+@media (max-width: 720px) {
+  body.mode-game .brand-sub { display: none; }
+  body.mode-game #btn-webcam-ar,
+  body.mode-game #btn-blueprint { display: none; }
+}

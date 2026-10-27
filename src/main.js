@@ -10,6 +10,8 @@ import { MetaQuestXRManager } from './xr/MetaQuestXRManager.js';
 import { BiomechanicalEngine } from './physics/BiomechanicalEngine.js';
 import { SpatialBioAudio } from './audio/SpatialBioAudio.js';
 import { TelemetryCharts } from './ui/TelemetryCharts.js';
+import { RoomMap, drawSparkline } from './ui/RoomMap.js';
+import { RoomSimulator, ROOM } from './game/RoomSimulator.js';
 import { formatDMS, thermalCSS } from './utils/heatmap.js';
 
 // --- 1. Initialize Renderer, Scene, Camera & Lighting ---
@@ -125,7 +127,7 @@ const engine = new BiomechanicalEngine({
   onFallDetected: (s) => {
     const coordSpeech = `Latitud ${Math.abs(s.gpsLat).toFixed(2)} norte, longitud ${Math.abs(s.gpsLon).toFixed(2)} oeste.`;
     audio.startFallAlarm(coordSpeech);
-    fallGpsHologram.triggerDeploy(0, 0);
+    fallGpsHologram.triggerDeploy(caneModel.root.position.x, caneModel.root.position.z);
     syncUiEmergencyState(true);
   },
   onFallReset: () => {
@@ -137,6 +139,29 @@ const engine = new BiomechanicalEngine({
     audio.playVitalPulse(hr);
   }
 });
+
+// --- 3b. Habitación métrica + peatón que camina con el bastón (modo juego) ---
+const room = new RoomSimulator({
+  parent: stageGroup,
+  caneModel,
+  patientAndRadar,
+  engine,
+  onFootstep: (intensity) => audio.playCaneTap(intensity)
+});
+
+const roomMap = new RoomMap(document.getElementById('room-map'));
+const hrSparkBuffer = new Array(180).fill(0.15);
+const rrSparkBuffer = new Array(180).fill(0.5);
+
+// Cámara en tercera persona: detrás del jugador, siguiendo su posición
+const startForward = new THREE.Vector3(Math.cos(room.player.heading), 0, -Math.sin(room.player.heading));
+camera.position.set(room.player.x, 1.62, room.player.z).addScaledVector(startForward, -2.15);
+controls.target.copy(room.getCameraTarget());
+controls.enablePan = false;
+controls.minDistance = 0.65;
+controls.maxDistance = 5.5;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.update();
 
 // Gather all 3D interactive meshes for mouse & Quest controller raycasting
 function getInteractiveTargets() {
@@ -165,6 +190,9 @@ function handleInteractiveAction(action) {
       highlightPatientProfileBtn(p.id);
       break;
     }
+    case 'drag_patient':
+      if (typeof room !== 'undefined' && room) room.relocatePatient();
+      break;
     case 'trigger_fall':
     case 'trigger_manual_sos':
       engine.triggerFall(elapsedGlobalSec);
@@ -274,12 +302,10 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
     }
 
     if (action === 'drag_patient') {
-      dragMode = 'patient';
-      controls.enabled = false;
-      dragStartClient = { x: ev.clientX, y: ev.clientY };
-      dragBasePatientX = patientAndRadar.patientGroup.position.x;
+      // La persona se reubica en otro punto de la habitación (hay que volver a encontrarla)
+      room.relocatePatient();
       audio.playClick(600);
-      renderer.domElement.setPointerCapture(ev.pointerId);
+      showToast('👤 La persona se movió a otro punto de la habitación');
       return;
     }
 
@@ -310,14 +336,6 @@ window.addEventListener('pointermove', (ev) => {
     return;
   }
 
-  if (dragMode === 'patient') {
-    const dx = ev.clientX - dragStartClient.x;
-    const nextX = Math.max(0.45, Math.min(2.20, dragBasePatientX + dx * 0.0038));
-    patientAndRadar.patientGroup.position.x = nextX;
-    document.getElementById('slider-dist').value = nextX.toFixed(2);
-    document.getElementById('lbl-dist-val').textContent = `${nextX.toFixed(2)} m`;
-    return;
-  }
 
   // Hover tooltip raycast
   if (!renderer.xr.isPresenting) {
@@ -344,18 +362,16 @@ window.addEventListener('pointerup', () => {
     engine.state.isGrabbed = false;
     engine.state.interactiveGripBoostN = 0;
     engine.state.interactiveAxialBoostN = 0;
-  } else if (dragMode === 'patient') {
-    dragMode = null;
-    controls.enabled = true;
   }
 });
 
 // --- 6. Smooth Camera Presets ---
+// Presets relativos a la posición actual del bastón / del jugador
 const CAM_PRESETS = {
-  overview: { pos: new THREE.Vector3(0.36, 1.16, 1.92), target: new THREE.Vector3(0.32, 0.62, 0) },
-  handle:   { pos: new THREE.Vector3(-0.04, 0.92, 0.56), target: new THREE.Vector3(-0.03, 0.82, 0) },
-  base:     { pos: new THREE.Vector3(-0.22, 0.28, 0.55), target: new THREE.Vector3(0.0, 0.08, 0) },
-  radar:    { pos: new THREE.Vector3(0.48, 1.28, 1.22), target: new THREE.Vector3(0.54, 1.02, 0) }
+  overview: { dist: 2.35, height: 1.62, yaw: -0.55, targetY: 0.95, usePlayer: true },
+  handle:   { dist: 0.72, height: 0.95, yaw: 0.95, targetY: 0.82, usePlayer: false },
+  base:     { dist: 0.85, height: 0.38, yaw: 0.62, targetY: 0.1, usePlayer: false },
+  radar:    { dist: 1.55, height: 1.18, yaw: -1.15, targetY: 0.9, usePlayer: false }
 };
 
 let camAnim = null;
@@ -363,11 +379,21 @@ let camAnim = null;
 function animateCameraPreset(name) {
   const preset = CAM_PRESETS[name];
   if (!preset) return;
+
+  const canePos = caneModel.root.position;
+  const base = preset.usePlayer
+    ? new THREE.Vector3(room.player.x, preset.targetY, room.player.z)
+    : new THREE.Vector3(canePos.x, preset.targetY, canePos.z);
+
+  const dir = new THREE.Vector3(Math.sin(preset.yaw), 0, Math.cos(preset.yaw));
+  const pos = base.clone().addScaledVector(dir, preset.dist);
+  pos.y = Math.max(0.25, preset.height);
+
   camAnim = {
     startPos: camera.position.clone(),
-    endPos: preset.pos.clone(),
+    endPos: pos,
     startTarget: controls.target.clone(),
-    endTarget: preset.target.clone(),
+    endTarget: base.clone(),
     t: 0
   };
   ['overview', 'handle', 'base', 'radar'].forEach((k) => {
@@ -408,17 +434,18 @@ sliderTiltZ.addEventListener('input', onTiltSlidersInput);
 
 function toggleGaitAuto() {
   if (engine.state.isFallen) engine.resetCane();
-  engine.state.gaitAutoEnabled = !engine.state.gaitAutoEnabled;
+  const active = !room.autoWalk;
+  room.setAutoWalk(active);
+  engine.state.gaitAutoEnabled = active;
+
   const btn = document.getElementById('btn-gait-auto');
-  btn.classList.toggle('active', engine.state.gaitAutoEnabled);
-  btn.textContent = engine.state.gaitAutoEnabled
-    ? '⏸ Detener Ciclo de Marcha Activa'
-    : '🚶 Simular Ciclo de Marcha Activa';
-  if (!engine.state.gaitAutoEnabled) {
-    engine.state.targetTiltXRad = 0;
-    engine.state.targetTiltZRad = 0;
-    sliderTiltX.value = '0';
-    sliderTiltZ.value = '0';
+  btn.classList.toggle('active', active);
+  btn.textContent = active ? '⏸ Detener Marcha Automática' : '🚶 Simular Ciclo de Marcha Activa';
+
+  const btn2 = document.getElementById('btn-autowalk');
+  if (btn2) {
+    btn2.classList.toggle('active', active);
+    btn2.textContent = active ? '⏸ Detener caminata' : '🚶 Caminar automático';
   }
 }
 document.getElementById('btn-gait-auto').addEventListener('click', () => {
@@ -470,9 +497,18 @@ sliderRr.addEventListener('input', () => {
   document.getElementById('lbl-rr-val').textContent = `${engine.state.trueRrRpm} RPM`;
 });
 
+// En el modo habitación la persona se ubica con el botón "Mover persona";
+// este deslizador la desplaza en línea recta frente al bastón (modo técnico).
 sliderDist.addEventListener('input', () => {
   const d = parseFloat(sliderDist.value);
-  patientAndRadar.patientGroup.position.x = d;
+  const canePos = caneModel.root.position;
+  const h = room.player.heading;
+  patientAndRadar.patientGroup.position.set(
+    canePos.x + Math.cos(h) * d,
+    0,
+    canePos.z - Math.sin(h) * d
+  );
+  engine.state.presenceDetected = false;
   document.getElementById('lbl-dist-val').textContent = `${d.toFixed(2)} m`;
 });
 
@@ -624,6 +660,108 @@ document.getElementById('btn-toggle-panels').addEventListener('click', (e) => {
   e.currentTarget.classList.toggle('active', !panelsVisible);
 });
 
+// --- 7b. Modo juego: alternancia, joystick táctil y controles de marcha ---
+const gameHudEl = document.getElementById('game-hud');
+
+// Toast efímero dentro del HUD de juego
+const toastEl = document.createElement('div');
+toastEl.id = 'game-toast';
+gameHudEl.appendChild(toastEl);
+let toastTimer = null;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+}
+
+const btnMode = document.getElementById('btn-mode');
+function setGameMode(isGame) {
+  document.body.classList.toggle('mode-game', isGame);
+  btnMode.textContent = isGame ? '🔬 Modo técnico' : '🎮 Modo juego';
+  btnMode.classList.toggle('active', !isGame);
+  if (isGame) {
+    roomsResize();
+  }
+  showToast(isGame
+    ? '🎮 Modo juego: solo los datos importantes'
+    : '🔬 Modo técnico: telemetría completa');
+}
+function roomsResize() {
+  try { roomMap.resize(); } catch (_) {}
+}
+btnMode.addEventListener('click', () => {
+  audio.playClick();
+  setGameMode(!document.body.classList.contains('mode-game'));
+});
+
+// Joystick táctil
+const joystickEl = document.getElementById('joystick');
+const knobEl = document.getElementById('joystick-knob');
+let joyPointerId = null;
+
+function updateJoystickFromEvent(ev) {
+  const rect = joystickEl.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const maxR = rect.width * 0.34;
+  let dx = ev.clientX - cx;
+  let dy = ev.clientY - cy;
+  const dist = Math.hypot(dx, dy);
+  if (dist > maxR) {
+    dx = (dx / dist) * maxR;
+    dy = (dy / dist) * maxR;
+  }
+  knobEl.style.transform = `translate(${dx}px, ${dy}px)`;
+  room.setJoystick(dx / maxR, -dy / maxR);
+}
+
+function resetJoystick() {
+  joyPointerId = null;
+  knobEl.style.transform = 'translate(0px, 0px)';
+  room.setJoystick(0, 0);
+}
+
+joystickEl.addEventListener('pointerdown', (ev) => {
+  ev.preventDefault();
+  audio.ensureContext();
+  joyPointerId = ev.pointerId;
+  joystickEl.setPointerCapture(ev.pointerId);
+  updateJoystickFromEvent(ev);
+});
+joystickEl.addEventListener('pointermove', (ev) => {
+  if (joyPointerId !== ev.pointerId) return;
+  updateJoystickFromEvent(ev);
+});
+joystickEl.addEventListener('pointerup', (ev) => {
+  if (joyPointerId === ev.pointerId) resetJoystick();
+});
+joystickEl.addEventListener('pointercancel', resetJoystick);
+
+// Botones del modo juego
+document.getElementById('btn-autowalk').addEventListener('click', () => {
+  audio.playClick();
+  toggleGaitAuto();
+});
+
+document.getElementById('btn-relocate-person').addEventListener('click', () => {
+  audio.playClick();
+  room.relocatePatient();
+  showToast('👤 La persona se movió: vuelve a buscarla con el radar');
+});
+
+document.getElementById('btn-game-fall').addEventListener('click', () => {
+  audio.ensureContext();
+  room.setAutoWalk(false);
+  engine.triggerFall(elapsedGlobalSec);
+});
+
+document.getElementById('btn-game-reset').addEventListener('click', () => {
+  audio.ensureContext();
+  engine.resetCane();
+  showToast('↻ Bastón recuperado en la mano');
+});
+
 // --- 8. UI Telemetry DOM Updater ---
 const statusPill = document.getElementById('system-status-pill');
 const kpiAxial = document.getElementById('kpi-axial');
@@ -705,6 +843,108 @@ function updateDomTelemetry(dt) {
   }
 
   charts.render(s);
+  updateGameHud(s);
+}
+
+// --- 8b. HUD del modo juego (solo datos importantes) ---
+const presenceBanner = document.getElementById('presence-banner');
+const presenceTitle = document.getElementById('presence-title');
+const presenceSub = document.getElementById('presence-sub');
+const presenceDist = document.getElementById('presence-dist');
+const fsrForceEl = document.getElementById('fsr-force');
+const fsrKgEl = document.getElementById('fsr-kg');
+const fsrBarEl = document.getElementById('fsr-bar');
+const axialForceEl = document.getElementById('axial-force');
+const axialKgEl = document.getElementById('axial-kg');
+const peakForceEl = document.getElementById('peak-force');
+const vitalHrEl = document.getElementById('vital-hr');
+const vitalRrEl = document.getElementById('vital-rr');
+const hrQualityEl = document.getElementById('hr-quality');
+const rrQualityEl = document.getElementById('rr-quality');
+const vitalCardHr = document.getElementById('vital-card-hr');
+const vitalCardRr = document.getElementById('vital-card-rr');
+const mapCoordsEl = document.getElementById('map-coords');
+const walkStepsEl = document.getElementById('walk-steps');
+const walkDistEl = document.getElementById('walk-dist');
+const walkCadenceEl = document.getElementById('walk-cadence');
+const mapObjectiveEl = document.getElementById('map-objective');
+
+let lastPresenceState = null;
+
+function updateGameHud(s) {
+  // --- Detección de presencia ---
+  const present = s.presenceDetected;
+  const locked = s.radarLocked;
+
+  presenceBanner.classList.toggle('detected', present && !locked);
+  presenceBanner.classList.toggle('locked', locked);
+
+  if (locked) {
+    presenceTitle.textContent = 'PRESENCIA DETECTADA · MIDIENDO SIGNOS VITALES';
+    presenceSub.textContent = 'Mantén el bastón apuntado al tórax para estabilizar la lectura';
+  } else if (present) {
+    presenceTitle.textContent = 'PRESENCIA HUMANA DETECTADA';
+    presenceSub.textContent = 'Acércate y apunta el bastón hacia el tórax para medir FC y FR';
+  } else {
+    presenceTitle.textContent = 'BUSCANDO PRESENCIA HUMANA';
+    presenceSub.textContent = 'Camina por la habitación y apunta el bastón hacia la persona';
+  }
+  presenceDist.textContent = present ? `${s.presenceDistanceM.toFixed(2)} m` : '-- m';
+
+  if (lastPresenceState !== present) {
+    lastPresenceState = present;
+    if (present && !locked) showToast('📡 Presencia detectada · apunta al tórax');
+    if (locked) showToast('❤️ Signos vitales enganchados');
+  }
+
+  // --- Presión del bastón (FSR) y celda de carga ---
+  const gripN = s.totalGripN;
+  fsrForceEl.textContent = gripN.toFixed(1);
+  fsrKgEl.textContent = `${(gripN / 9.81).toFixed(1)} kg`;
+  fsrBarEl.style.width = `${Math.min(100, (gripN / 165) * 100)}%`;
+  fsrForceEl.style.color = thermalCSS(Math.min(1, gripN / 140));
+
+  axialForceEl.textContent = `${s.axialForceN.toFixed(1)} N`;
+  axialKgEl.textContent = `${(s.axialForceN / 9.81).toFixed(1)} kg`;
+  peakForceEl.textContent = `${Math.round(Math.max(s.peakGripN, s.peakAxialN))} N`;
+
+  // --- Signos vitales ---
+  if (locked) {
+    vitalHrEl.textContent = String(Math.round(s.measuredHr));
+    vitalRrEl.textContent = String(Math.round(s.measuredRr));
+    const q = Math.round(s.vitalsQuality01 * 100);
+    hrQualityEl.textContent = `CALIDAD ${q}%`;
+    rrQualityEl.textContent = `SNR ${s.radarSnrDb.toFixed(1)} dB`;
+    vitalCardHr.classList.add('active');
+    vitalCardRr.classList.add('active');
+  } else {
+    vitalHrEl.textContent = '--';
+    vitalRrEl.textContent = '--';
+    hrQualityEl.textContent = present ? 'SIN ENGANCHAR' : '—';
+    rrQualityEl.textContent = present ? 'SIN ENGANCHAR' : '—';
+    vitalCardHr.classList.remove('active');
+    vitalCardRr.classList.remove('active');
+  }
+
+  // Esparcogramas en vivo
+  hrSparkBuffer.push(locked ? s.systolicPulse01 : 0.12 + Math.random() * 0.02);
+  if (hrSparkBuffer.length > 180) hrSparkBuffer.shift();
+  rrSparkBuffer.push(locked ? 0.5 + 0.5 * Math.sin(s.respPhaseRad) : 0.5);
+  if (rrSparkBuffer.length > 180) rrSparkBuffer.shift();
+  drawSparkline(document.getElementById('spark-hr'), hrSparkBuffer, locked ? '#fb7185' : '#475569');
+  drawSparkline(document.getElementById('spark-rr'), rrSparkBuffer, locked ? '#2dd4bf' : '#475569');
+
+  // --- Mapa y estadísticas de marcha ---
+  mapCoordsEl.textContent = `X ${room.player.x.toFixed(1)} · Z ${room.player.z.toFixed(1)}`;
+  walkStepsEl.textContent = String(s.stepsCount);
+  walkDistEl.textContent = `${s.distanceWalkedM.toFixed(1)} m`;
+  walkCadenceEl.textContent = `${Math.round(s.cadenceSpm)} ppm`;
+
+  const objectiveDone = s.measurementSeconds > 4;
+  mapObjectiveEl.classList.toggle('done', objectiveDone);
+  mapObjectiveEl.textContent = objectiveDone
+    ? '✅ Objetivo cumplido: FC y FR medidas'
+    : '🎯 Localiza a la persona y mide su FC y FR';
 }
 
 // --- 9. Resize Handler & Main WebGL / WebXR Render Loop ---
@@ -712,10 +952,13 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  roomMap.resize();
 });
 
 const clock = new THREE.Clock();
 const _piezoWorld = new THREE.Vector3();
+const _followTarget = new THREE.Vector3();
+const _followDelta = new THREE.Vector3();
 let bootCompleted = false;
 
 renderer.setAnimationLoop((timestampMs, xrFrame) => {
@@ -731,12 +974,27 @@ renderer.setAnimationLoop((timestampMs, xrFrame) => {
     if (camAnim.t >= 1) camAnim = null;
   }
 
-  if (!renderer.xr.isPresenting) {
-    controls.update();
-  }
-
   // Step XR controllers / hand tracking / hit-test floor reticle
   xrManager.update(xrFrame);
+
+  const activeCamera = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+
+  // --- Habitación: mueve al peatón y coloca el bastón en su mano ---
+  room.update(dt, elapsedGlobalSec, {
+    renderer,
+    camera,
+    controls,
+    xrCamera: renderer.xr.isPresenting ? activeCamera : null
+  });
+
+  // Cámara en tercera persona que sigue al jugador (sin pelear con la órbita del usuario)
+  if (!renderer.xr.isPresenting && !camAnim) {
+    const followTarget = room.getCameraTarget(_followTarget);
+    _followDelta.copy(followTarget).sub(controls.target);
+    controls.target.copy(followTarget);
+    camera.position.add(_followDelta);
+    controls.update();
+  }
 
   // Step biomechanical physics & 60 GHz signal synthesis
   engine.step(dt, elapsedGlobalSec);
@@ -751,16 +1009,19 @@ renderer.setAnimationLoop((timestampMs, xrFrame) => {
   patientAndRadar.update(caneModel, engine.state, elapsedGlobalSec);
 
   // Update 3D Spatial GPS Hologram (when fallen) & Diegetic Spatial Panels
-  const activeCamera = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
   fallGpsHologram.update(engine.state, activeCamera, elapsedGlobalSec, dt);
+  if (!engine.state.isFallen) {
+    spatialHud.root.position.set(caneModel.root.position.x, 0, caneModel.root.position.z);
+  }
   spatialHud.update(engine.state, renderer.xr.isPresenting, elapsedGlobalSec);
 
   // Update 3D Spatial Audio Listener & Cane Piezo Source
   caneModel.getPiezoWorldPosition(_piezoWorld);
   audio.updateSpatialTransform(_piezoWorld, activeCamera);
 
-  // Refresh 2D HUD & Oscilloscopes
+  // Refresh 2D HUD, Oscilloscopes & Mapa de la habitación
   updateDomTelemetry(dt);
+  roomMap.render(room.getMapData(), elapsedGlobalSec);
 
   renderer.render(scene, camera);
 
@@ -773,5 +1034,8 @@ renderer.setAnimationLoop((timestampMs, xrFrame) => {
       bootOverlay.classList.add('is-hidden');
       window.setTimeout(() => bootOverlay.remove(), 700);
     }
+    window.setTimeout(() => {
+      showToast('🎮 Camina con WASD / joystick y apunta el bastón a la persona para medir FC y FR');
+    }, 1100);
   }
 });

@@ -16,7 +16,7 @@
       }
     </script>
   </head>
-  <body>
+  <body class="mode-game">
     <div id="viewport-root">
       <!-- Boot / Diagnostics Overlay (auto-hides when the 3D engine is ready) -->
       <div id="boot-overlay">
@@ -56,6 +56,10 @@
           </button>
           <button id="btn-blueprint" class="btn" title="Comparar con diseño técnico original CaneSmart Meta.jpg">
             📐 Plano Original
+          </button>
+
+          <button id="btn-mode" class="btn btn-mode" title="Alternar entre modo juego (datos clave) y modo técnico (telemetría completa)">
+            🔬 Modo técnico
           </button>
 
           <button id="btn-cam-overview" class="btn active">Vista General</button>
@@ -278,6 +282,88 @@
           </div>
         </section>
       </aside>
+
+      <!-- ===================== MODO JUEGO (HUD simplificado) ===================== -->
+      <div id="game-hud">
+        <!-- Estado de detección de presencia humana -->
+        <div id="presence-banner" class="presence-banner searching">
+          <span class="pb-dot"></span>
+          <div class="pb-text">
+            <div id="presence-title">BUSCANDO PRESENCIA HUMANA</div>
+            <div id="presence-sub">Camina por la habitación y apunta el bastón hacia la persona</div>
+          </div>
+          <div id="presence-dist" class="pb-dist">-- m</div>
+        </div>
+
+        <!-- Presión sobre el bastón (sensor de fuerza FSR + celda de carga) -->
+        <div id="pressure-card" class="hud-card pressure">
+          <div class="card-head">
+            <span>PRESIÓN EN EL BASTÓN</span>
+            <span class="mini-badge">SENSOR FSR</span>
+          </div>
+          <div class="big-force">
+            <span id="fsr-force" class="big-num">42.0</span>
+            <span class="big-unit">N</span>
+            <span id="fsr-kg" class="kg-chip">4.3 kg</span>
+          </div>
+          <div class="force-bar"><div id="fsr-bar" class="force-fill"></div></div>
+          <div class="force-rows">
+            <div class="force-row"><span>Celda de carga axial</span><strong id="axial-force">165.0 N</strong></div>
+            <div class="force-row"><span>Peso que soporta</span><strong id="axial-kg">16.8 kg</strong></div>
+            <div class="force-row"><span>Pico de la sesión</span><strong id="peak-force">0 N</strong></div>
+          </div>
+          <div class="pressure-hint">Arrastra la empuñadura hacia abajo para apretar el bastón</div>
+        </div>
+
+        <!-- Mapa cenital de la habitación -->
+        <div id="map-card" class="hud-card map">
+          <div class="card-head">
+            <span>MAPA DE LA HABITACIÓN</span>
+            <span id="map-coords" class="mini-badge">X 0.0 · Z 0.0</span>
+          </div>
+          <canvas id="room-map"></canvas>
+          <div class="map-legend">
+            <span><i class="dot you"></i>Tú</span>
+            <span><i class="dot cane"></i>Bastón</span>
+            <span><i class="dot person"></i>Persona</span>
+          </div>
+          <div class="map-stats">
+            <div><span>Pasos</span><strong id="walk-steps">0</strong></div>
+            <div><span>Distancia</span><strong id="walk-dist">0.0 m</strong></div>
+            <div><span>Cadencia</span><strong id="walk-cadence">0 ppm</strong></div>
+          </div>
+          <div id="map-objective" class="map-objective">🎯 Localiza a la persona y mide su FC y FR</div>
+        </div>
+
+        <!-- Signos vitales en tiempo real -->
+        <div id="vitals-strip">
+          <div class="vital-card hr" id="vital-card-hr">
+            <div class="vital-head"><span>RITMO CARDÍACO</span><span id="hr-quality" class="quality">—</span></div>
+            <div class="vital-body"><span id="vital-hr" class="vital-num">--</span><span class="vital-unit">BPM</span></div>
+            <canvas id="spark-hr" width="180" height="38"></canvas>
+          </div>
+          <div class="vital-card rr" id="vital-card-rr">
+            <div class="vital-head"><span>FRECUENCIA RESPIRATORIA</span><span id="rr-quality" class="quality">—</span></div>
+            <div class="vital-body"><span id="vital-rr" class="vital-num">--</span><span class="vital-unit">RPM</span></div>
+            <canvas id="spark-rr" width="180" height="38"></canvas>
+          </div>
+        </div>
+
+        <!-- Controles de desplazamiento / simulación de marcha -->
+        <div id="walk-controls">
+          <div id="joystick" title="Arrastra para caminar">
+            <div id="joystick-knob"></div>
+            <span class="joy-label">MOVER</span>
+          </div>
+          <div class="walk-buttons">
+            <button id="btn-autowalk" class="btn">🚶 Caminar automático</button>
+            <button id="btn-relocate-person" class="btn">👤 Mover persona</button>
+            <button id="btn-game-fall" class="btn btn-danger">⚠ Caída SOS</button>
+            <button id="btn-game-reset" class="btn btn-recover">↻ Recoger bastón</button>
+          </div>
+          <div class="kbd-hint">WASD / flechas para caminar · Shift = correr · arrastra para mirar</div>
+        </div>
+      </div>
 
       <!-- Floating Reference Blueprint Card -->
       <div id="blueprint-card" class="blueprint-card">

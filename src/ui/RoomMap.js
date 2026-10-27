@@ -1,353 +1,344 @@
-import { ROOM } from '../game/RoomSimulator.js';
+import { ROOM_BOUNDS } from '../world/RoomLocomotion.js';
 
 /**
- * Mapa 2D en planta de la habitación (vista cenital) con:
- *  - muros, puerta y mobiliario
- *  - rastro del recorrido del usuario
- *  - jugador (flecha de orientación) y bastón
- *  - cono de cobertura del radar 60 GHz (presencia ±60° / signos vitales ±26°)
- *  - última posición conocida de la persona detectada
- *  - marcador SOS si el bastón ha caído
+ * RoomMap — Plano cenital (2D) de la habitación con:
+ *  - Posición y orientación del usuario que camina con el bastón.
+ *  - Persona monitorizada por el radar de 60 GHz.
+ *  - Cono de detección (presencia ±60° y bloqueo de signos vitales ±30°).
+ *  - Rastro del recorrido y distancia medida.
  */
+
+const FURNITURE = [
+  { type: 'bed', x0: 1.68, x1: 2.55, z0: -1.88, z1: 0.16, label: 'Cama' },
+  { type: 'desk', x0: -1.34, x1: -0.34, z0: -1.90, z1: -1.26, label: 'Mesa' },
+  { type: 'chair', x0: -0.22, x1: 0.24, z0: -1.72, z1: -1.28, label: 'Silla' },
+  { type: 'plant', x0: -2.42, x1: -2.02, z0: 1.52, z1: 1.92, label: '' }
+];
+
+const DOOR = { axis: 'z', side: 'max', from: -0.95, to: 0.05 };
+const WINDOW = { axis: 'z', side: 'min', from: 0.25, to: 1.55 };
+
 export class RoomMap {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    const cssW = canvas.clientWidth || 320;
-    const cssH = canvas.clientHeight || 240;
-    canvas.width = Math.round(cssW * this.dpr);
-    canvas.height = Math.round(cssH * this.dpr);
-    this.width = cssW;
-    this.height = cssH;
-    this._lastPaint = -1;
-    this._pulse = 0;
+    this.padding = 15;
+    this._lastFrame = -1;
+    this.resize();
   }
 
   resize() {
-    const cssW = this.canvas.clientWidth || 320;
-    const cssH = this.canvas.clientHeight || 240;
-    this.canvas.width = Math.round(cssW * this.dpr);
-    this.canvas.height = Math.round(cssH * this.dpr);
-    this.width = cssW;
-    this.height = cssH;
+    const rect = this.canvas.getBoundingClientRect();
+    const cssW = Math.max(240, Math.round(rect.width || 320));
+    const cssH = Math.max(180, Math.round(rect.height || 250));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.canvas.width = Math.round(cssW * dpr);
+    this.canvas.height = Math.round(cssH * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.cssW = cssW;
+    this.cssH = cssH;
+
+    const availW = cssW - this.padding * 2;
+    const availH = cssH - this.padding * 2;
+    this.scale = Math.min(
+      availW / (ROOM_BOUNDS.maxX - ROOM_BOUNDS.minX),
+      availH / (ROOM_BOUNDS.maxZ - ROOM_BOUNDS.minZ)
+    );
+    this.offX = (cssW - (ROOM_BOUNDS.maxX - ROOM_BOUNDS.minX) * this.scale) / 2;
+    this.offY = (cssH - (ROOM_BOUNDS.maxZ - ROOM_BOUNDS.minZ) * this.scale) / 2;
   }
 
-  render(data, elapsedSec) {
-    if (!this.ctx) return;
-    // Repintado a ~30 fps
-    if (elapsedSec - this._lastPaint < 0.033) return;
-    this._lastPaint = elapsedSec;
+  toPx(x, z) {
+    return {
+      px: this.offX + (x - ROOM_BOUNDS.minX) * this.scale,
+      py: this.offY + (z - ROOM_BOUNDS.minZ) * this.scale
+    };
+  }
 
+  render({ locomotion, state, patient, elapsed, fpsHint = 0 }) {
     const ctx = this.ctx;
-    const dpr = this.dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, this.width, this.height);
+    const { cssW: w, cssH: h } = this;
+    const locked = !!state.radarLocked;
+    const presence = !!state.presenceDetected;
 
-    const pad = 12;
-    const availW = this.width - pad * 2;
-    const availH = this.height - pad * 2;
-    const scale = Math.min(availW / ROOM.width, availH / ROOM.depth);
-    const offX = pad + (availW - ROOM.width * scale) / 2;
-    const offZ = pad + (availH - ROOM.depth * scale) / 2;
+    ctx.clearRect(0, 0, w, h);
 
-    const mx = (x) => offX + (x + ROOM.width / 2) * scale;
-    const mz = (z) => offZ + (z + ROOM.depth / 2) * scale;
-
-    // Fondo
-    ctx.fillStyle = '#050c18';
-    roundRect(ctx, 0.5, 0.5, this.width - 1, this.height - 1, 10);
+    // Fondo del plano
+    const bg = ctx.createLinearGradient(0, 0, w, h);
+    bg.addColorStop(0, 'rgba(8, 20, 38, 0.92)');
+    bg.addColorStop(1, 'rgba(5, 12, 24, 0.96)');
+    ctx.fillStyle = bg;
+    this.roundRect(ctx, 1, 1, w - 2, h - 2, 14);
     ctx.fill();
 
-    // Suelo de la habitación
-    ctx.fillStyle = '#08172b';
-    ctx.fillRect(mx(-ROOM.width / 2), mz(-ROOM.depth / 2), ROOM.width * scale, ROOM.depth * scale);
+    const { px: x0, py: y0 } = this.toPx(ROOM_BOUNDS.minX, ROOM_BOUNDS.minZ);
+    const { px: x1, py: y1 } = this.toPx(ROOM_BOUNDS.maxX, ROOM_BOUNDS.maxZ);
+    const roomW = x1 - x0;
+    const roomH = y1 - y0;
 
-    // Rejilla 0.5 m
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)';
-    ctx.lineWidth = 1;
+    // Suelo
+    ctx.save();
     ctx.beginPath();
-    for (let x = -ROOM.width / 2; x <= ROOM.width / 2 + 1e-6; x += 0.5) {
-      ctx.moveTo(mx(x), mz(-ROOM.depth / 2));
-      ctx.lineTo(mx(x), mz(ROOM.depth / 2));
-    }
-    for (let z = -ROOM.depth / 2; z <= ROOM.depth / 2 + 1e-6; z += 0.5) {
-      ctx.moveTo(mx(-ROOM.width / 2), mz(z));
-      ctx.lineTo(mx(ROOM.width / 2), mz(z));
-    }
-    ctx.stroke();
+    this.roundRect(ctx, x0, y0, roomW, roomH, 10);
+    ctx.clip();
+    const floorGrad = ctx.createLinearGradient(x0, y0, x0, y1);
+    floorGrad.addColorStop(0, 'rgba(14, 34, 60, 0.85)');
+    floorGrad.addColorStop(1, 'rgba(9, 22, 40, 0.9)');
+    ctx.fillStyle = floorGrad;
+    ctx.fillRect(x0, y0, roomW, roomH);
 
-    // Cono del radar 60 GHz
-    const cane = data.cane;
-    const heading = data.player.heading;
-    // En pantalla: dir = (cos h, -sin h)
-    const dirAngle = Math.atan2(-Math.sin(heading), Math.cos(heading));
-
-    const drawWedge = (halfAngleDeg, radiusM, color, alpha) => {
-      const r = Math.min(radiusM, ROOM.width + ROOM.depth) * scale;
-      const a0 = dirAngle - (halfAngleDeg * Math.PI) / 180;
-      const a1 = dirAngle + (halfAngleDeg * Math.PI) / 180;
-      const g = ctx.createRadialGradient(mx(cane.x), mz(cane.z), 2, mx(cane.x), mz(cane.z), r);
-      g.addColorStop(0, `rgba(${color}, ${alpha})`);
-      g.addColorStop(1, `rgba(${color}, 0)`);
-      ctx.fillStyle = g;
+    // Rejilla métrica
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.11)';
+    ctx.lineWidth = 1;
+    for (let gx = Math.ceil(ROOM_BOUNDS.minX); gx <= ROOM_BOUNDS.maxX; gx++) {
+      const { px } = this.toPx(gx, 0);
       ctx.beginPath();
-      ctx.moveTo(mx(cane.x), mz(cane.z));
-      ctx.arc(mx(cane.x), mz(cane.z), r, a0, a1);
-      ctx.closePath();
-      ctx.fill();
-    };
-
-    if (!data.isFallen) {
-      drawWedge(55, 2.75, '34, 211, 238', data.presenceDetected ? 0.18 : 0.1);
-      drawWedge(30, 2.40, '52, 211, 153', data.vitalsLocked ? 0.24 : 0.08);
+      ctx.moveTo(px, y0);
+      ctx.lineTo(px, y1);
+      ctx.stroke();
     }
-
-    // Rastro
-    if (data.trail && data.trail.length > 1) {
-      ctx.strokeStyle = 'rgba(34, 211, 238, 0.34)';
-      ctx.lineWidth = 2;
-      ctx.lineJoin = 'round';
+    for (let gz = Math.ceil(ROOM_BOUNDS.minZ); gz <= ROOM_BOUNDS.maxZ; gz++) {
+      const { py } = this.toPx(0, gz);
       ctx.beginPath();
-      data.trail.forEach((p, i) => {
-        if (i === 0) ctx.moveTo(mx(p.x), mz(p.z));
-        else ctx.lineTo(mx(p.x), mz(p.z));
-      });
+      ctx.moveTo(x0, py);
+      ctx.lineTo(x1, py);
       ctx.stroke();
     }
 
     // Mobiliario
-    ctx.font = '9px ui-monospace, monospace';
-    ROOM.furniture.forEach((f) => {
-      const x = mx(f.x - f.w / 2);
-      const y = mz(f.z - f.d / 2);
-      const w = f.w * scale;
-      const h = f.d * scale;
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.42)';
-      ctx.lineWidth = 1;
-      roundRect(ctx, x, y, w, h, 3);
+    FURNITURE.forEach((f) => {
+      const { px: fx0, py: fz0 } = this.toPx(f.x0, f.z0);
+      const { px: fx1, py: fz1 } = this.toPx(f.x1, f.z1);
+      ctx.fillStyle = f.type === 'plant' ? 'rgba(16, 185, 129, 0.16)' : 'rgba(51, 65, 85, 0.55)';
+      ctx.strokeStyle = f.type === 'plant' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(100, 116, 139, 0.55)';
+      ctx.lineWidth = 1.2;
+      this.roundRect(ctx, fx0, fz0, fx1 - fx0, fz1 - fz0, f.type === 'bed' ? 6 : 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = 'rgba(148, 197, 235, 0.55)';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      if (w > 26) ctx.fillText(f.label, x + w / 2, y + h / 2);
+      if (f.type === 'bed') {
+        // Almohada
+        const { py: pad } = this.toPx(0, f.z0);
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.25)';
+        this.roundRect(ctx, fx0 + 4, pad + 4, fx1 - fx0 - 8, 12, 4);
+        ctx.fill();
+      }
+      if (f.label) {
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.75)';
+        ctx.font = '600 8.5px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(f.label, (fx0 + fx1) / 2, (fz0 + fz1) / 2 + 3);
+      }
     });
 
+    // Rastro del recorrido
+    if (locomotion.trail.length > 1) {
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      for (let i = 1; i < locomotion.trail.length; i++) {
+        const a = locomotion.trail[i - 1];
+        const b = locomotion.trail[i];
+        const { px: ax, py: ay } = this.toPx(a.x, a.z);
+        const { px: bx, py: by } = this.toPx(b.x, b.z);
+        const alpha = 0.06 + 0.5 * (i / locomotion.trail.length);
+        ctx.strokeStyle = `rgba(0, 229, 255, ${alpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+      }
+    }
+
+    // Conos de detección del radar (desde el bastón)
+    const cane = locomotion.canePosition;
+    const { px: cx, py: cy } = this.toPx(cane.x, cane.z);
+    const dirAngle = Math.atan2(Math.cos(locomotion.aimYaw), Math.sin(locomotion.aimYaw));
+
+    const drawCone = (halfAngleDeg, radiusM, fill, stroke) => {
+      const radius = radiusM * this.scale;
+      const half = (halfAngleDeg * Math.PI) / 180;
+      const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, radius);
+      grad.addColorStop(0, fill);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, radius, dirAngle - half, dirAngle + half);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1.1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    };
+
+    drawCone(65, 3.5, presence ? 'rgba(56, 189, 248, 0.22)' : 'rgba(100, 116, 139, 0.16)',
+      presence ? 'rgba(56, 189, 248, 0.55)' : 'rgba(100, 116, 139, 0.35)');
+    if (locked) {
+      drawCone(30, 2.95, 'rgba(52, 211, 153, 0.26)', 'rgba(52, 211, 153, 0.8)');
+    }
+
+    ctx.restore();
+
     // Muros
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-    const L = mx(-ROOM.width / 2);
-    const R = mx(ROOM.width / 2);
-    const T = mz(-ROOM.depth / 2);
-    const B = mz(ROOM.depth / 2);
+    ctx.strokeStyle = 'rgba(125, 211, 252, 0.5)';
+    ctx.lineWidth = 2.4;
+    // Arriba / abajo con huecos de ventana y puerta
+    const seg = (ax, ay, bx, by) => {
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+    };
+    const wp = (v) => this.toPx(v, ROOM_BOUNDS.minZ).px;
+    const wpBottom = (v) => this.toPx(v, ROOM_BOUNDS.maxZ).px;
+    const yTop = this.toPx(0, ROOM_BOUNDS.minZ).py;
+    const yBot = this.toPx(0, ROOM_BOUNDS.maxZ).py;
+
+    seg(x0, yTop, wp(WINDOW.from), yTop);
+    seg(wp(WINDOW.to), yTop, x1, yTop);
+    seg(x0, yBot, wpBottom(DOOR.from), yBot);
+    seg(wpBottom(DOOR.to), yBot, x1, yBot);
+    seg(x0, yTop, x0, yBot);
+    seg(x1, yTop, x1, yBot);
+
+    // Ventana y puerta
+    ctx.strokeStyle = 'rgba(125, 211, 252, 0.85)';
+    ctx.lineWidth = 2;
+    seg(wp(WINDOW.from), yTop, wp(WINDOW.to), yTop);
+    ctx.strokeStyle = 'rgba(52, 211, 153, 0.85)';
+    seg(wpBottom(DOOR.from), yBot, wpBottom(DOOR.to), yBot);
+
+    // Persona monitorizada
+    const { px: ppx, py: ppy } = this.toPx(patient.x, patient.z);
+    const pulse = 0.5 + 0.5 * Math.sin(elapsed * (locked ? 3.2 : 1.4));
+    const personColor = locked ? '52, 211, 153' : presence ? '56, 189, 248' : '148, 163, 184';
     ctx.beginPath();
-    ctx.moveTo(L, T);
-    ctx.lineTo(R, T);
-    ctx.moveTo(L, T);
-    ctx.lineTo(L, B);
-    ctx.moveTo(R, T);
-    ctx.lineTo(R, B);
+    ctx.arc(ppx, ppy, 9 + pulse * 5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${personColor}, ${0.12 + pulse * 0.1})`;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(ppx, ppy, 5.6, 0, Math.PI * 2);
+    ctx.fillStyle = `rgb(${personColor})`;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(2, 8, 20, 0.9)';
+    ctx.lineWidth = 1.4;
     ctx.stroke();
 
-    // Muro sur con hueco de puerta
-    const doorL = mx(ROOM.door.centerX - ROOM.door.halfWidth);
-    const doorR = mx(ROOM.door.centerX + ROOM.door.halfWidth);
-    ctx.beginPath();
-    ctx.moveTo(L, B);
-    ctx.lineTo(doorL, B);
-    ctx.moveTo(doorR, B);
-    ctx.lineTo(R, B);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(34, 211, 238, 0.45)';
-    ctx.lineWidth = 1.5;
+    // Etiqueta de la persona (se voltea si está cerca del borde derecho) con fondo legible
+    const flip = ppx > x1 - 108;
+    const labelX = ppx + (flip ? -12 : 12);
+    const align = flip ? 'right' : 'left';
+    this._labelPill(ctx, 'PERSONA', labelX, ppy + 18, align, 'rgba(226, 244, 255, 0.95)', '700 8.5px system-ui, sans-serif');
+    this._labelPill(ctx, locked ? `${Math.round(state.measuredHr)} lpm · ${Math.round(state.measuredRr)} rpm` : 'sin signos',
+      labelX, ppy + 30, align, `rgba(${personColor}, 0.98)`, '600 8px system-ui, sans-serif');
+
+    // Línea de distancia
     ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = locked ? 'rgba(52, 211, 153, 0.55)' : 'rgba(148, 163, 184, 0.35)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(doorL, B);
-    ctx.lineTo(doorR, B);
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ppx, ppy);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(103, 232, 249, 0.7)';
-    ctx.font = '8px ui-monospace, monospace';
+    // Etiqueta de distancia desplazada en perpendicular para no tapar los nombres
+    let midX = (cx + ppx) / 2;
+    let midY = (cy + ppy) / 2;
+    const segLen = Math.hypot(ppx - cx, ppy - cy) || 1;
+    midX += ((ppy - cy) / segLen) * 17;
+    midY += (-(ppx - cx) / segLen) * 17;
+    const distText = `${state.radarDistanceM.toFixed(2)} m`;
+    ctx.font = '700 8.5px system-ui, sans-serif';
+    const tw = ctx.measureText(distText).width;
+    ctx.fillStyle = 'rgba(4, 10, 20, 0.85)';
+    this.roundRect(ctx, midX - tw / 2 - 4, midY - 7, tw + 8, 13, 4);
+    ctx.fill();
+    ctx.fillStyle = locked ? '#6ee7b7' : '#94a3b8';
     ctx.textAlign = 'center';
-    ctx.fillText('PUERTA', (doorL + doorR) / 2, B - 6);
+    ctx.fillText(distText, midX, midY + 2.5);
 
-    // Persona detectada / última posición conocida
-    const patient = data.patient;
-    if (data.presenceDetected) {
-      this._pulse = (this._pulse + 0.05) % (Math.PI * 2);
-      const pr = 8 + Math.sin(this._pulse) * 2.2;
-      const px = mx(patient.x);
-      const pz = mz(patient.z);
-
-      ctx.beginPath();
-      ctx.arc(px, pz, pr + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(244, 114, 182, 0.5)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(px, pz, pr, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(244, 114, 182, 0.9)';
-      ctx.fill();
-
-      ctx.fillStyle = '#fbcfe8';
-      ctx.font = 'bold 8.5px ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(data.vitalsLocked ? 'FC + FR' : 'PRESENCIA', px, pz - pr - 8);
-    } else if (data.patientDetectedOnce && data.patientLastKnown) {
-      const known = data.patientLastKnown;
-      ctx.beginPath();
-      ctx.arc(mx(known.x), mz(known.z), 6, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(244, 114, 182, 0.4)';
-      ctx.setLineDash([2, 2]);
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(251, 207, 232, 0.55)';
-      ctx.font = 'bold 8px ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('?', mx(known.x), mz(known.z) + 3);
-    }
-
-    // Bastón
-    if (!data.isFallen) {
-      const cx = mx(cane.x);
-      const cz = mz(cane.z);
-      ctx.save();
-      ctx.translate(cx, cz);
-      ctx.fillStyle = '#fbbf24';
-      ctx.strokeStyle = '#78350f';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, -4.5);
-      ctx.lineTo(4.5, 0);
-      ctx.lineTo(0, 4.5);
-      ctx.lineTo(-4.5, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Jugador
-    const px = mx(data.player.x);
-    const pz = mz(data.player.z);
-    ctx.save();
-    ctx.translate(px, pz);
-    ctx.rotate(dirAngle);
-
+    // Usuario con el bastón (punta del bastón + cuerpo)
+    const { px: ux, py: uy } = this.toPx(locomotion.position.x, locomotion.position.z);
     ctx.beginPath();
-    ctx.arc(0, 0, 9, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(34, 211, 238, 0.16)';
+    ctx.arc(ux, uy, 6.4, 0, Math.PI * 2);
+    ctx.fillStyle = '#38bdf8';
     ctx.fill();
+    ctx.strokeStyle = 'rgba(4, 12, 26, 0.9)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
 
+    // Flecha de orientación
     ctx.beginPath();
-    ctx.moveTo(11, 0);
-    ctx.lineTo(-5, 6);
-    ctx.lineTo(-2, 0);
-    ctx.lineTo(-5, -6);
+    const fx = Math.sin(locomotion.yaw);
+    const fz = Math.cos(locomotion.yaw);
+    ctx.moveTo(ux + fx * 15, uy + fz * 15);
+    ctx.lineTo(ux + fx * 6 - fz * 5, uy + fz * 6 + fx * 5);
+    ctx.lineTo(ux + fx * 6 + fz * 5, uy + fz * 6 - fx * 5);
     ctx.closePath();
-    ctx.fillStyle = '#22d3ee';
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.9)';
     ctx.fill();
-    ctx.strokeStyle = '#04121f';
-    ctx.lineWidth = 1;
+
+    // Línea de apuntado del bastón
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(ux, uy);
+    ctx.lineTo(ux + Math.sin(locomotion.aimYaw) * 26, uy + Math.cos(locomotion.aimYaw) * 26);
     ctx.stroke();
     ctx.restore();
 
-    ctx.fillStyle = '#a5f3fc';
-    ctx.font = 'bold 8.5px ui-monospace, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('TÚ', px, pz - 13);
-
-    // Marcador SOS
-    if (data.isFallen) {
-      const fx = mx(cane.x);
-      const fz = mz(cane.z);
-      ctx.strokeStyle = '#ff2e4c';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(fx, fz, 13, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(fx - 5, fz - 5);
-      ctx.lineTo(fx + 5, fz + 5);
-      ctx.moveTo(fx + 5, fz - 5);
-      ctx.lineTo(fx - 5, fz + 5);
-      ctx.stroke();
-      ctx.fillStyle = '#fda4af';
-      ctx.font = 'bold 9px ui-monospace, monospace';
-      ctx.fillText('SOS', fx, fz - 17);
-    }
-
-    // Brújula y escala
-    ctx.fillStyle = 'rgba(148, 197, 235, 0.85)';
-    ctx.font = 'bold 10px ui-monospace, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('N', this.width - 16, 18);
+    // Punta del bastón
     ctx.beginPath();
-    ctx.moveTo(this.width - 16, 22);
-    ctx.lineTo(this.width - 16, 32);
-    ctx.strokeStyle = 'rgba(148, 197, 235, 0.7)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fill();
 
-    const barPx = scale * 1; // 1 metro
-    ctx.strokeStyle = 'rgba(148, 197, 235, 0.75)';
+    this._labelPill(ctx, 'TÚ + BASTÓN', ux, uy - 12, 'center', 'rgba(226, 244, 255, 0.95)', '700 8.5px system-ui, sans-serif');
+
+    // Regla de escala (1 m)
+    const barPx = this.scale;
+    const bx0 = x1 - barPx - 12;
+    const by0 = y1 - 7;
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.75)';
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(14, this.height - 12);
-    ctx.lineTo(14 + barPx, this.height - 12);
+    ctx.moveTo(bx0, by0 - 4);
+    ctx.lineTo(bx0, by0);
+    ctx.lineTo(bx0 + barPx, by0);
+    ctx.lineTo(bx0 + barPx, by0 - 4);
     ctx.stroke();
-    ctx.fillStyle = 'rgba(148, 197, 235, 0.8)';
-    ctx.font = '8px ui-monospace, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('1 m', 14, this.height - 16);
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
+    ctx.font = '600 8px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('1 m', bx0 + barPx / 2, by0 - 6);
   }
-}
 
-/** Sparkline en vivo para las tarjetas de FC / FR */
-export function drawSparkline(canvas, buffer, color, min = 0, max = 1) {
-  if (!canvas || !buffer || buffer.length < 2) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, h / 2);
-  ctx.lineTo(w, h / 2);
-  ctx.stroke();
-
-  ctx.beginPath();
-  const span = Math.max(1e-6, max - min);
-  for (let i = 0; i < buffer.length; i++) {
-    const x = (i / (buffer.length - 1)) * w;
-    const norm = Math.max(0, Math.min(1, (buffer[i] - min) / span));
-    const y = h - 2 - norm * (h - 4);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+  _labelPill(ctx, text, x, y, align, color, font) {
+    ctx.font = font;
+    ctx.textAlign = align;
+    const tw = ctx.measureText(text).width;
+    const padX = 4;
+    const left = align === 'right' ? x - tw - padX : align === 'center' ? x - tw / 2 - padX : x - padX;
+    ctx.fillStyle = 'rgba(4, 10, 20, 0.82)';
+    this.roundRect(ctx, left, y - 8, tw + padX * 2, 12, 3.5);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y + 1);
   }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.8;
-  ctx.lineJoin = 'round';
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 5;
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-}
 
-function roundRect(ctx, x, y, w, h, r) {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
-  ctx.closePath();
+  roundRect(ctx, x, y, w, h, r) {
+    const rad = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rad);
+    ctx.arcTo(x + w, y + h, x, y + h, rad);
+    ctx.arcTo(x, y + h, x, y, rad);
+    ctx.arcTo(x, y, x + w, y, rad);
+    ctx.closePath();
+  }
 }

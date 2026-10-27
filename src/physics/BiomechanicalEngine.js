@@ -72,31 +72,6 @@ export class BiomechanicalEngine {
       copX: 0,
       copZ: 0,
 
-      // Peatón / habitación (modo juego)
-      walking: false,
-      walkSpeedMps: 0,
-      cadenceSpm: 0,
-      stepsCount: 0,
-      distanceWalkedM: 0,
-      playerX: 0,
-      playerZ: 0,
-      playerHeadingRad: 0,
-      patientRoomX: 0,
-      patientRoomZ: 0,
-
-      // Detección de presencia humana (radar 60 GHz)
-      presenceDetected: false,
-      presenceDistanceM: 0,
-      presenceAngleDeg: 0,
-      presenceMemoryAgeSec: 0,
-      patientDetectedOnce: false,
-      vitalsQuality01: 0,
-      measurementSeconds: 0,
-
-      // Récords de sesión (para el HUD de juego)
-      peakGripN: 0,
-      peakAxialN: 0,
-
       // 60 GHz mmWave Radar & Virtual Patient Vitals
       patientProfileLabel: PATIENT_PROFILES[0].label,
       trueHrBpm: 72,
@@ -108,6 +83,9 @@ export class BiomechanicalEngine {
       respPhaseRad: 0,
       cardiacPhaseRad: 0,
       systolicPulse01: 0,
+      presenceDetected: true,
+      presenceDistanceM: 0.85,
+      presenceOffAxisDeg: 4.0,
       radarLocked: true,
       radarDistanceM: 0.85,
       radarOffAxisDeg: 4.0,
@@ -248,11 +226,7 @@ export class BiomechanicalEngine {
     } else {
       // Normal upright / interactive / gait operation
       if (s.gaitAutoEnabled && !s.isGrabbed) {
-        // La cadencia sigue la velocidad real del peatón (zancada de 0.68 m)
-        const cycleDur = s.walking
-          ? Math.max(0.55, Math.min(2.4, 0.68 / Math.max(0.3, s.walkSpeedMps)))
-          : 1.48;
-        this._gaitPhase = (this._gaitPhase + dt / cycleDur) % 1.0;
+        this._gaitPhase = (this._gaitPhase + dt / 1.48) % 1.0;
         const p = this._gaitPhase;
         // Swing (0..0.34) vs Stance (0.34..1.0)
         if (p < 0.34) {
@@ -319,10 +293,6 @@ export class BiomechanicalEngine {
     s.totalGripN += (targetGrip - s.totalGripN) * Math.min(1, dt * 15);
     s.axialForceN += (targetAxial - s.axialForceN) * Math.min(1, dt * 15);
 
-    // Récords de presión de la sesión (HUD de juego)
-    if (s.totalGripN > s.peakGripN) s.peakGripN = s.totalGripN;
-    if (s.axialForceN > s.peakAxialN) s.peakAxialN = s.axialForceN;
-
     // Distribute grip across 6 FSR zones
     const weights = GRIP_PROFILES[s.gripProfileKey].weights;
     for (let i = 0; i < 6; i++) {
@@ -383,11 +353,6 @@ export class BiomechanicalEngine {
 
     if (newCardiacCycle > prevCardiacCycle && s.radarLocked && !s.isFallen) {
       this.onSystolicBeat(s.measuredHr);
-    }
-
-    // Tiempo acumulado de medición válida de signos vitales
-    if (s.radarLocked && !s.isFallen && !s.isFalling) {
-      s.measurementSeconds += dt;
     }
 
     if (s.radarLocked) {

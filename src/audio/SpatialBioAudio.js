@@ -120,43 +120,6 @@ export class SpatialBioAudio {
     metal.stop(now + 0.17);
   }
 
-  /** Golpe seco del bastón contra el suelo en cada paso (marcha) */
-  playCaneTap(intensity = 0.6) {
-    if (this.muted || !this.ensureContext()) return;
-    const now = this.ctx.currentTime;
-    const amp = Math.max(0.15, Math.min(1, intensity));
-
-    // Cuerpo grave del impacto de la punta
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(215, now);
-    osc.frequency.exponentialRampToValueAtTime(72, now + 0.09);
-
-    gain.gain.setValueAtTime(0.2 * amp, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    osc.start(now);
-    osc.stop(now + 0.13);
-
-    // Repique metálico corto del tubo de aluminio
-    const metal = this.ctx.createOscillator();
-    const mGain = this.ctx.createGain();
-    metal.type = 'sine';
-    metal.frequency.setValueAtTime(1750 + Math.random() * 260, now);
-    metal.frequency.exponentialRampToValueAtTime(980, now + 0.06);
-
-    mGain.gain.setValueAtTime(0.055 * amp, now);
-    mGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
-
-    metal.connect(mGain);
-    mGain.connect(this.masterGain);
-    metal.start(now);
-    metal.stop(now + 0.08);
-  }
-
   playVitalPulse(hrBpm = 72) {
     if (this.muted || !this.vitalBeepEnabled || this.alarmActive) return;
     if (!this.ensureContext()) return;

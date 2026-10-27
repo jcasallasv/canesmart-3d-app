@@ -45,7 +45,7 @@ export class VirtualPatientAndRadar {
       emissive: 0x0ea5e9,
       emissiveIntensity: 0.18,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.3,
       roughness: 0.25,
       metalness: 0.1,
       side: THREE.DoubleSide,
@@ -56,7 +56,7 @@ export class VirtualPatientAndRadar {
       color: 0x38bdf8,
       wireframe: true,
       transparent: true,
-      opacity: 0.14
+      opacity: 0.2
     });
 
     // Floor biometric platform ring (draggable target to reposition virtual user)
@@ -85,9 +85,9 @@ export class VirtualPatientAndRadar {
       opacity: 0.55,
       side: THREE.DoubleSide
     });
-    this.floorRing = new THREE.Mesh(floorRingGeo, floorRingMat);
-    this.floorRing.position.y = 0.004;
-    this.patientGroup.add(this.floorRing);
+    const floorRing = new THREE.Mesh(floorRingGeo, floorRingMat);
+    floorRing.position.y = 0.004;
+    this.patientGroup.add(floorRing);
 
     // Legs
     const legGeo = new THREE.CapsuleGeometry(0.068, 0.68, 10, 18);
@@ -351,33 +351,17 @@ export class VirtualPatientAndRadar {
     const cosAngle = this._tmpBoresight.dot(dirToSternum);
     const offAxisDeg = THREE.MathUtils.radToDeg(Math.acos(Math.max(-1, Math.min(1, cosAngle))));
 
-    // Determinar presencia humana y enganche de signos vitales
-    //  - Presencia: persona dentro de ±60° y hasta 4.2 m del radomo
-    //  - Signos vitales (FC/FR): dentro de ±26° y hasta 2.85 m
-    const inRange = state.radarEnabled && distToSternum >= 0.25;
-    const presence = inRange && distToSternum <= 2.75 && offAxisDeg <= 55.0;
-    const locked = inRange && distToSternum <= 2.40 && offAxisDeg <= 30.0;
-
+    // Determinar PRESENCIA HUMANA (cono ancho ±60°, hasta 3.4 m) y BLOQUEO de signos vitales
+    // (cono estrecho ±30°, hasta 2.65 m) exigido para medir FR y FC con el radar FMCW.
+    const presence = state.radarEnabled && distToSternum >= 0.20 && distToSternum <= 3.50 && offAxisDeg <= 65.0;
     state.presenceDetected = presence;
     state.presenceDistanceM = distToSternum;
-    state.presenceAngleDeg = offAxisDeg;
+    state.presenceOffAxisDeg = offAxisDeg;
+
+    const locked = state.radarEnabled && distToSternum >= 0.25 && distToSternum <= 2.95 && offAxisDeg <= 30.0;
     state.radarLocked = locked;
     state.radarDistanceM = distToSternum;
     state.radarOffAxisDeg = offAxisDeg;
-
-    if (presence) {
-      state.patientDetectedOnce = true;
-      state.presenceMemoryAgeSec = 0;
-    } else {
-      state.presenceMemoryAgeSec = (state.presenceMemoryAgeSec || 0) + 0.016;
-    }
-
-    state.vitalsQuality01 = locked
-      ? Math.max(
-          0.05,
-          Math.min(1, 1 - (distToSternum - 0.3) / 2.2) * Math.min(1, 1 - offAxisDeg / 30)
-        )
-      : 0;
 
     if (locked) {
       // Realistic SNR (dB) from radar equation ~ 1/r^4 and antenna pattern cos^4(theta)
@@ -389,28 +373,18 @@ export class VirtualPatientAndRadar {
     }
 
     // 3. Render 60 GHz Electromagnetic Beam
-    this.beamGroup.visible = state.radarEnabled;
-    this.temGroup.visible = state.radarEnabled;
-    this.echoGroup.visible = locked;
-    this.chestSpotGroup.visible = presence;
-
-    // Indicadores del avatar según detección de presencia
-    if (this.floorRing) {
-      this.floorRing.material.color.setHex(presence ? 0x34d399 : 0x00e5ff);
-      this.floorRing.material.opacity = presence ? 0.85 : 0.5;
-    }
-    if (this.patientBaseMesh) {
-      this.patientBaseMesh.material.emissive.setHex(presence ? 0x10b981 : 0x0284c7);
-      this.patientBaseMesh.material.emissiveIntensity = presence ? 0.55 : 0.3;
-    }
+    const beamOn = state.radarEnabled && !state.isFallen;
+    this.beamGroup.visible = beamOn;
+    this.temGroup.visible = beamOn;
+    this.echoGroup.visible = locked && !state.isFallen;
+    this.chestSpotGroup.visible = locked && !state.isFallen;
 
     if (!state.radarEnabled) return;
 
-    const beamLength = locked || presence ? distToSternum : 1.25;
-    const beamAimPoint =
-      locked || presence
-        ? this._tmpSternumWorld
-        : this._tmpRadomePos.clone().addScaledVector(this._tmpBoresight, beamLength);
+    const beamLength = locked ? distToSternum : 1.25;
+    const beamAimPoint = locked
+      ? this._tmpSternumWorld
+      : this._tmpRadomePos.clone().addScaledVector(this._tmpBoresight, beamLength);
 
     this.beamGroup.position.copy(this._tmpRadomePos);
     this.beamGroup.lookAt(beamAimPoint);
@@ -419,8 +393,8 @@ export class VirtualPatientAndRadar {
     const coneSpread = locked ? 0.68 : 0.85;
     this.coneMesh.scale.set(coneSpread * beamLength, coneSpread * beamLength, beamLength);
     this.wireConeMesh.scale.copy(this.coneMesh.scale);
-    this.coneMat.color.setHex(locked ? 0x34d399 : presence ? 0x00e5ff : 0x64748b);
-    this.coneMat.opacity = locked ? 0.12 + 0.03 * Math.sin(elapsedSec * 6) : presence ? 0.09 : 0.05;
+    this.coneMat.color.setHex(locked ? 0x00e5ff : 0x64748b);
+    this.coneMat.opacity = locked ? 0.11 + 0.03 * Math.sin(elapsedSec * 6) : 0.06;
 
     // Animate 60 GHz Outgoing Wavefront Rings
     const halfAngleTan = Math.tan(THREE.MathUtils.degToRad(15));

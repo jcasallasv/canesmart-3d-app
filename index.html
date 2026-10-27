@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>CaneSmart MR — Gemelo Digital Biomédico (Meta Quest WebXR)</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="viewport-root">
+      <!-- Live Webcam Passthrough Fallback Layer -->
+      <video id="webcam-feed" autoplay playsinline muted></video>
+
+      <!-- Three.js WebGL / WebXR Mixed Reality Viewport -->
+      <div id="canvas-container"></div>
+
+      <!-- Top Horizon-OS Spatial Header -->
+      <header class="top-hud">
+        <div class="brand-cluster">
+          <div class="brand-mark">CS</div>
+          <div>
+            <div class="brand-title">
+              CaneSmart MR
+              <span id="system-status-pill" class="status-pill">● MONITOREO BIOMÉTRICO ACTIVO</span>
+            </div>
+            <div class="brand-sub">Gemelo Digital 1:1 · Sensores FSR + Celda de Carga + Radar 60 GHz + SOS GPS 3D</div>
+          </div>
+        </div>
+
+        <div class="hud-actions">
+          <button id="btn-enter-xr" class="btn btn-xr-primary" title="Iniciar Passthrough Mixed Reality en Meta Quest Browser">
+            🥽 Meta Quest MR (Passthrough)
+          </button>
+          <button id="btn-webcam-ar" class="btn" title="Simular entorno físico real usando cámara local">
+            📷 Webcam AR
+          </button>
+          <button id="btn-blueprint" class="btn" title="Comparar con diseño técnico original CaneSmart Meta.jpg">
+            📐 Plano Original
+          </button>
+
+          <button id="btn-cam-overview" class="btn active">Vista General</button>
+          <button id="btn-cam-handle" class="btn">Empuñadura FSR</button>
+          <button id="btn-cam-base" class="btn">Celda + Base</button>
+          <button id="btn-cam-radar" class="btn">Radar 60 GHz</button>
+
+          <button id="btn-audio-mute" class="btn" title="Activar/Silenciar audio espacial 3D">🔊 Audio 3D</button>
+          <button id="btn-toggle-panels" class="btn" title="Mostrar u ocultar paneles laterales">▤ Paneles</button>
+        </div>
+      </header>
+
+      <!-- Left Dock: Biomechanical & Scenario Controls -->
+      <aside id="left-dock" class="side-dock left">
+        <!-- Section 1: FSR & Load Cell Biomechanics -->
+        <section class="dock-section">
+          <div class="section-header">
+            <span>1. Biomecánica FSR + Celda</span>
+            <span class="badge">TIEMPO REAL</span>
+          </div>
+
+          <button id="btn-gait-auto" class="btn" style="justify-content:center; width:100%;">
+            🚶 Simular Ciclo de Marcha Activa
+          </button>
+
+          <div class="control-row">
+            <div class="control-label">
+              <span>Presión Agarre Empuñadura (Σ FSR)</span>
+              <span id="lbl-grip-val" class="control-val">42 N</span>
+            </div>
+            <input id="slider-grip" type="range" min="0" max="140" step="1" value="42" />
+          </div>
+
+          <div class="control-row">
+            <div class="control-label">
+              <span>Carga Axial en Bastón (Celda)</span>
+              <span id="lbl-axial-val" class="control-val">165 N</span>
+            </div>
+            <input id="slider-axial" type="range" min="0" max="420" step="1" value="165" />
+          </div>
+
+          <div class="control-row">
+            <div class="control-label"><span>Distribución Anatómica de Agarre</span></div>
+            <div class="pill-grid" id="grip-profile-group">
+              <button class="pill-btn active" data-grip="ergonomic">Palmar Normal</button>
+              <button class="pill-btn" data-grip="hook">Gancho Curvo</button>
+              <button class="pill-btn" data-grip="anterior">Pinza Anterior</button>
+              <button class="pill-btn" data-grip="unstable">Inestable</button>
+            </div>
+          </div>
+
+          <div class="control-row">
+            <div class="control-label">
+              <span>Inclinación Bastón (Eje X / Eje Z)</span>
+              <span id="lbl-tilt-val" class="control-val">0.0°</span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+              <input id="slider-tilt-x" type="range" min="-42" max="42" step="0.5" value="0" title="Inclinación anteroposterior" />
+              <input id="slider-tilt-z" type="range" min="-42" max="42" step="0.5" value="0" title="Inclinación mediolateral" />
+            </div>
+          </div>
+
+          <div class="thermal-scale">
+            <div class="thermal-gradient"></div>
+            <div class="thermal-ticks">
+              <span>0 N (Reposo)</span>
+              <span>Media</span>
+              <span>Sobrecarga Crítica</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section 2: 60 GHz mmWave Radar & Virtual User -->
+        <section class="dock-section">
+          <div class="section-header">
+            <span>2. Radar mmWave 60 GHz</span>
+            <span class="badge">λ = 5.0 mm</span>
+          </div>
+
+          <label class="toggle-line">
+            <span>Emitir Haz Electromagnético 60 GHz</span>
+            <input id="chk-radar-beam" type="checkbox" checked />
+          </label>
+
+          <div class="pill-grid" id="patient-profile-group">
+            <button class="pill-btn active" data-profile="normal">Reposo (72/15)</button>
+            <button class="pill-btn" data-profile="walking">Marcha (104/22)</button>
+            <button class="pill-btn" data-profile="tachycardia">Taquicardia</button>
+            <button class="pill-btn" data-profile="bradypnea">Bradipnea</button>
+          </div>
+
+          <div class="control-row">
+            <div class="control-label">
+              <span>Frecuencia Cardíaca Usuario</span>
+              <span id="lbl-hr-val" class="control-val">72 BPM</span>
+            </div>
+            <input id="slider-hr" type="range" min="45" max="165" step="1" value="72" />
+          </div>
+
+          <div class="control-row">
+            <div class="control-label">
+              <span>Frecuencia Respiratoria Usuario</span>
+              <span id="lbl-rr-val" class="control-val">15 RPM</span>
+            </div>
+            <input id="slider-rr" type="range" min="8" max="34" step="1" value="15" />
+          </div>
+
+          <div class="control-row">
+            <div class="control-label">
+              <span>Distancia Usuario Virtual</span>
+              <span id="lbl-dist-val" class="control-val">0.95 m</span>
+            </div>
+            <input id="slider-dist" type="range" min="0.45" max="2.20" step="0.02" value="0.95" />
+          </div>
+
+          <label class="toggle-line">
+            <span>Bip Sonoro Síncrono al Latido</span>
+            <input id="chk-vital-beep" type="checkbox" />
+          </label>
+        </section>
+
+        <!-- Section 3: Fall Detection & 3D GPS Beacon -->
+        <section class="dock-section">
+          <div class="section-header">
+            <span>3. Evento de Caída y GPS 3D</span>
+            <span class="badge">SOS IMU</span>
+          </div>
+
+          <button id="btn-trigger-fall" class="btn btn-danger" style="justify-content:center; width:100%; padding:9px;">
+            ⚠ SIMULAR CAÍDA + DESPLEGAR GPS 3D
+          </button>
+
+          <button id="btn-reset-cane" class="btn btn-recover" style="justify-content:center; width:100%;">
+            ↻ Levantar Bastón / Cancelar SOS
+          </button>
+
+          <button id="btn-real-gps" class="btn" style="justify-content:center; width:100%;">
+            📍 Actualizar con mi GPS Real
+          </button>
+
+          <label class="toggle-line">
+            <span>Paneles Holográficos 3D Flotantes</span>
+            <input id="chk-spatial-hud" type="checkbox" checked />
+          </label>
+          <label class="toggle-line">
+            <span>Consola Botones XR en Escena 3D</span>
+            <input id="chk-spatial-dock" type="checkbox" />
+          </label>
+        </section>
+      </aside>
+
+      <!-- Right Dock: Live Multi-Sensor Biomedical Telemetry -->
+      <aside id="right-dock" class="side-dock right">
+        <section class="dock-section">
+          <div class="section-header">
+            <span>Mapa Térmico 6×FSR y CoP Base</span>
+            <span id="badge-cop-state" class="badge">ESTABLE</span>
+          </div>
+          <canvas id="canvas-anatomy" class="scope-canvas" width="328" height="136"></canvas>
+
+          <div class="kpi-grid">
+            <div class="kpi-box">
+              <div class="kpi-title">Celda de Carga Axial</div>
+              <div id="kpi-axial" class="kpi-num" style="color:#34d399;">165.0 N</div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-title">Suma Sensores FSR</div>
+              <div id="kpi-grip" class="kpi-num" style="color:#fbbf24;">42.0 N</div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-title">Frec. Cardíaca 60GHz</div>
+              <div id="kpi-hr" class="kpi-num" style="color:#fb7185;">72 BPM</div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-title">Frec. Respiratoria</div>
+              <div id="kpi-rr" class="kpi-num" style="color:#2dd4bf;">15 RPM</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="dock-section">
+          <div class="section-header">
+            <span>Osciloscopios Biomédicos</span>
+            <span id="badge-snr" class="badge">SNR 26.5 dB</span>
+          </div>
+
+          <div class="scope-wrap">
+            <div class="scope-caption">
+              <span style="color:#34d399;">■ Celda Carga (N)</span>
+              <span style="color:#f59e0b;">■ Agarre FSR (N)</span>
+            </div>
+            <canvas id="scope-force" class="scope-canvas" width="320" height="68"></canvas>
+          </div>
+
+          <div class="scope-wrap">
+            <div class="scope-caption">
+              <span style="color:#00e5ff;">■ Onda Fase Torácica 60 GHz Δφ(t)</span>
+              <span id="lbl-radar-lock" style="color:#34d399;">ENGANCHADO</span>
+            </div>
+            <canvas id="scope-radar" class="scope-canvas" width="320" height="68"></canvas>
+          </div>
+
+          <div class="scope-wrap">
+            <div class="scope-caption">
+              <span style="color:#a78bfa;">■ IMU Aceleración |a| (g)</span>
+              <span id="lbl-imu-g" style="color:#cbd5e1;">1.00 g</span>
+            </div>
+            <canvas id="scope-imu" class="scope-canvas" width="320" height="62"></canvas>
+          </div>
+        </section>
+
+        <section class="dock-section">
+          <div class="section-header">
+            <span>Baliza GNSS / Coordenadas 3D</span>
+            <span id="badge-sos" class="badge">EN ESPERA</span>
+          </div>
+          <div id="gps-box" class="gps-readout">
+            LAT: 4.710989° N · LON: 74.072092° W<br />
+            ALT: 2625 m · BOGOTÁ D.C. (LISTO)
+          </div>
+        </section>
+      </aside>
+
+      <!-- Floating Reference Blueprint Card -->
+      <div id="blueprint-card" class="blueprint-card">
+        <div class="section-header">
+          <span>Plano Original CaneSmart</span>
+          <button id="btn-close-blueprint" class="pill-btn" style="padding:2px 7px;">✕</button>
+        </div>
+        <img src="/cane-blueprint.jpg" alt="Plano técnico CaneSmart original" />
+        <div style="font-size:10.5px; color:#94a3b8; text-align:center;">
+          Geometría 1:1 modelada sobre la referencia adjunta (0.88 m)
+        </div>
+      </div>
+
+      <!-- Bottom Interactive Hint -->
+      <div class="bottom-hint">
+        💡 <strong>Interacción Directa 3D / Quest:</strong> Arrastra la <strong>empuñadura</strong> hacia abajo para ejercer presión (FSR/Celda) o hacia los lados (&gt;43°) para provocar una caída real con GPS 3D.
+      </div>
+
+      <!-- 3D Hover Tooltip -->
+      <div id="cursor-tooltip"></div>
+
+      <!-- Meta Quest WebXR Info / Guidance Modal -->
+      <div id="xr-modal" class="modal-backdrop">
+        <div class="modal-panel">
+          <h2>🥽 Modo Realidad Mixta (Meta Quest Passthrough)</h2>
+          <p id="xr-modal-msg">
+            Esta aplicación incluye soporte nativo <strong>WebXR Immersive-AR (Passthrough)</strong> para gafas <strong>Meta Quest 2, Quest Pro, Quest 3 y Quest 3S</strong>.
+          </p>
+          <ul>
+            <li><strong>En tus gafas Meta Quest:</strong> Abre el navegador <em>Meta Quest Browser</em>, ingresa a la URL HTTPS de esta vista previa y pulsa <span class="code-chip">🥽 Meta Quest MR</span>. Verás el bastón CaneSmart a escala real (88 cm) sobre el suelo físico de tu habitación.</li>
+            <li><strong>Controles Touch y Manos:</strong> Acerca tu mano o control a la empuñadura y presiona <strong>Grip + Gatillo</strong> para ejercer presión biomecánica real (con vibración háptica), inclinar el bastón, apuntar el haz de 60 GHz o soltarlo para disparar la alarma sonora y el holograma GPS 3D.</li>
+            <li><strong>En PC o Móvil ahora mismo:</strong> Puedes interactuar directamente con el ratón/táctil en 3D o pulsar <span class="code-chip">📷 Webcam AR</span> arriba para superponer la escena sobre tu entorno físico real.</li>
+          </ul>
+          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:4px;">
+            <button id="btn-modal-webcam" class="btn">📷 Activar Webcam AR Aquí</button>
+            <button id="btn-modal-close" class="btn btn-xr-primary">Entendido</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

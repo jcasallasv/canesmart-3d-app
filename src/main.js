@@ -716,6 +716,7 @@ window.addEventListener('resize', () => {
 
 const clock = new THREE.Clock();
 const _piezoWorld = new THREE.Vector3();
+let bootCompleted = false;
 
 renderer.setAnimationLoop((timestampMs, xrFrame) => {
   const dt = clock.getDelta();
@@ -762,4 +763,15 @@ renderer.setAnimationLoop((timestampMs, xrFrame) => {
   updateDomTelemetry(dt);
 
   renderer.render(scene, camera);
+
+  // First successful frame -> dismiss the boot overlay & arm the diagnostics watchdog
+  if (!bootCompleted) {
+    bootCompleted = true;
+    window.__CANESMART_BOOTED__ = true;
+    const bootOverlay = document.getElementById('boot-overlay');
+    if (bootOverlay) {
+      bootOverlay.classList.add('is-hidden');
+      window.setTimeout(() => bootOverlay.remove(), 700);
+    }
+  }
 });

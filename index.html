@@ -4,10 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>CaneSmart MR — Gemelo Digital Biomédico (Meta Quest WebXR)</title>
-    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="./src/styles.css" />
+
+    <!-- Import Map nativo para que funcione directamente en GitHub Pages y Meta Quest Browser sin compilar -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+          "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="viewport-root">
+      <!-- Boot / Diagnostics Overlay (auto-hides when the 3D engine is ready) -->
+      <div id="boot-overlay">
+        <div class="boot-card">
+          <div class="boot-spinner"></div>
+          <div class="boot-title">Inicializando gemelo digital 3D…</div>
+          <div class="boot-sub">Cargando Three.js, WebXR y motor biomecánico</div>
+          <pre id="boot-error" hidden></pre>
+        </div>
+      </div>
+
       <!-- Live Webcam Passthrough Fallback Layer -->
       <video id="webcam-feed" autoplay playsinline muted></video>
 
@@ -265,7 +285,11 @@
           <span>Plano Original CaneSmart</span>
           <button id="btn-close-blueprint" class="pill-btn" style="padding:2px 7px;">✕</button>
         </div>
-        <img src="/cane-blueprint.jpg" alt="Plano técnico CaneSmart original" />
+        <img
+          src="./cane-blueprint.jpg"
+          onerror="this.onerror=null;this.src='./public/cane-blueprint.jpg';"
+          alt="Plano técnico CaneSmart original"
+        />
         <div style="font-size:10.5px; color:#94a3b8; text-align:center;">
           Geometría 1:1 modelada sobre la referencia adjunta (0.88 m)
         </div>
@@ -287,7 +311,7 @@
             Esta aplicación incluye soporte nativo <strong>WebXR Immersive-AR (Passthrough)</strong> para gafas <strong>Meta Quest 2, Quest Pro, Quest 3 y Quest 3S</strong>.
           </p>
           <ul>
-            <li><strong>En tus gafas Meta Quest:</strong> Abre el navegador <em>Meta Quest Browser</em>, ingresa a la URL HTTPS de esta vista previa y pulsa <span class="code-chip">🥽 Meta Quest MR</span>. Verás el bastón CaneSmart a escala real (88 cm) sobre el suelo físico de tu habitación.</li>
+            <li><strong>En tus gafas Meta Quest:</strong> Abre el navegador <em>Meta Quest Browser</em>, ingresa a la URL HTTPS de tu GitHub Pages y pulsa <span class="code-chip">🥽 Meta Quest MR</span>. Verás el bastón CaneSmart a escala real (88 cm) sobre el suelo físico de tu habitación.</li>
             <li><strong>Controles Touch y Manos:</strong> Acerca tu mano o control a la empuñadura y presiona <strong>Grip + Gatillo</strong> para ejercer presión biomecánica real (con vibración háptica), inclinar el bastón, apuntar el haz de 60 GHz o soltarlo para disparar la alarma sonora y el holograma GPS 3D.</li>
             <li><strong>En PC o Móvil ahora mismo:</strong> Puedes interactuar directamente con el ratón/táctil en 3D o pulsar <span class="code-chip">📷 Webcam AR</span> arriba para superponer la escena sobre tu entorno físico real.</li>
           </ul>
@@ -299,6 +323,38 @@
       </div>
     </div>
 
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="./src/main.js"></script>
+
+    <!-- Diagnostic watchdog: explains on screen (in Spanish) if the 3D module fails to boot -->
+    <script>
+      (function () {
+        var overlay = document.getElementById('boot-overlay');
+        var errEl = document.getElementById('boot-error');
+        function show(msg) {
+          if (window.__CANESMART_BOOTED__) return;
+          if (!overlay || !errEl) return;
+          overlay.classList.add('boot-error-mode');
+          errEl.hidden = false;
+          errEl.textContent = msg;
+        }
+        window.addEventListener('error', function (e) {
+          if (e && e.message) {
+            show('No se pudo cargar el motor 3D.\n\n' + e.message + (e.filename ? '\n' + e.filename + ':' + e.lineno : ''));
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e && e.reason;
+          show('Error de ejecución:\n\n' + (r && (r.message || r)));
+        });
+        window.setTimeout(function () {
+          if (!window.__CANESMART_BOOTED__) {
+            show('El motor 3D no terminó de inicializar (9 s).\n\nCausas habituales:\n' +
+              '1) index.html se está sirviendo desde una ruta donde src/main.js no existe.\n' +
+              '2) La red bloquea el CDN de Three.js (cdn.jsdelivr.net).\n' +
+              '3) La consola (F12 > Consola) muestra el error exacto de JavaScript.');
+          }
+        }, 9000);
+      })();
+    </script>
   </body>
 </html>
